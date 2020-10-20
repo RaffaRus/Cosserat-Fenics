@@ -1,0 +1,30 @@
+N=1 
+     JOB TIME SUMMARY
+       USER TIME (SEC)      =   40.300    
+       SYSTEM TIME (SEC)    =   1.7000    
+       TOTAL CPU TIME (SEC) =   42.000    
+       WALLCLOCK TIME (SEC) =         42
+
+N=2
+     JOB TIME SUMMARY
+       USER TIME (SEC)      =   47.000    
+       SYSTEM TIME (SEC)    =   2.9000    
+       TOTAL CPU TIME (SEC) =   49.900    
+       WALLCLOCK TIME (SEC) =         31
+	   
+	   25 steps
+	   
+	   
+N=4
+          JOB TIME SUMMARY
+       USER TIME (SEC)      =   54.300    
+       SYSTEM TIME (SEC)    =   4.9000    
+       TOTAL CPU TIME (SEC) =   59.200    
+       WALLCLOCK TIME (SEC) =         26
+	   
+N=6
+	        JOB TIME SUMMARY
+       USER TIME (SEC)      =   61.300    
+       SYSTEM TIME (SEC)    =   9.9000    
+       TOTAL CPU TIME (SEC) =   71.200    
+       WALLCLOCK TIME (SEC) =         26

@@ -78,6 +78,7 @@
 # still needed to circumvent the known issue with ``uflacs``::
 
 from __future__ import print_function
+import time
 from dolfin import *
 import numpy as np
 parameters["form_compiler"]["representation"] = 'quadrature'
@@ -110,17 +111,23 @@ def load_steps(file_name):
                 pass
     return steps
 
+comm = MPI.comm_world
+
 # As before, we load a ``Gmsh`` generated mesh representing a portion of a thick cylinder::
 
 #Re, Ri = 1.3, 1.   # external/internal radius
 #mesh = Mesh("tensile_dog_bone_specimen.xml")
 #facets = MeshFunction("int", mesh, "./tensile_dog_bone_specimen_gmsh:geometrical.xml")
+#loading_mesh_time = time.perf_counter()
 
 mesh = Mesh()
-XDMFFile("mesh.xdmf").read(mesh)
+XDMFFile(comm, "mesh.xdmf").read(mesh)
 mvc = MeshValueCollection("size_t", mesh, mesh.topology().dim()-1)
-XDMFFile("mf.xdmf").read(mvc, "name_to_read")
+XDMFFile(comm, "mf.xdmf").read(mvc, "name_to_read")
 facets = cpp.mesh.MeshFunctionSizet(mesh, mvc)
+
+#loading_mesh_time = time.perf_counter() - loading_mesh_time
+#print("Time elapsed for reading the mesh: ", loading_mesh_time, ", mesh cells: ", mesh.num_cells(), ", mesh vertices: ", mesh.num_vertices())
 
 #ds = Measure('ds')[facets]
 eps_ds = 1E-14
@@ -145,6 +152,8 @@ def boundary_R(x, on_boundary):
 # from the dimension of the Quadrature function spaces or computed from the number of
 # mesh cells and the chosen quadrature degree)::
 
+#init_func_time = time.perf_counter()
+
 deg_u = 2
 deg_stress = 2
 stress_strain_dim = 6
@@ -163,9 +172,9 @@ Wce = TensorElement("Quadrature", mesh.ufl_cell(), degree=deg_stress,
 WC = FunctionSpace(mesh, Wce)
 
 # get total number of gauss points
-ngauss = W0.dim()
+#ngauss = W0.dim()
 
-print("# GAUSS points: ", ngauss)
+#print("# GAUSS points: ", ngauss)
 
 # Various functions are defined to keep track of the current internal state (stresses, 
 # current strain estimate, cumulative plastic strain and cpnsistent tangent matrix)
@@ -185,9 +194,14 @@ du = Function(V, name="Iteration correction")
 v = TrialFunction(V)
 u_ = TestFunction(V)
 
+#init_func_time = time.perf_counter() - init_func_time
+#print("Time elapsed for initializing the functions and spaces: ", init_func_time)
+
+ngauss = p.vector().get_local().size
 
 #print("P get local : ", dir(p.get_local()))
 #print("P get local : ", p.get_local())
+print("Numer of gauss points: ", ngauss)
 
 # ----------------------------------------------------
 # Material constitutive law definition using `MFront`
@@ -339,7 +353,7 @@ res = -inner(eps_MFront(u_), sig)*dxm + F_ext(u_)
 # FunctionSpace (here piecewise constant) and Function for output of the equivalent
 # plastic strain since XDMF output does not handle Quadrature elements::
 
-file_results = XDMFFile("plasticity_results.xdmf")
+file_results = XDMFFile(comm, "plasticity_results_mpi.xdmf")
 file_results.parameters["flush_output"] = True
 file_results.parameters["functions_share_mesh"] = True
 P0 = FunctionSpace(mesh, "DG", 0)
@@ -349,7 +363,6 @@ p_avg = Function(P0, name="Plastic strain")
 
 # one integrates the behaviour over the time step and computes an elastic stiffness
 it = mgis_bv.IntegrationType.PredictionWithElasticOperator
-#print("m.n: ", m.n)
 #m.n numer of intergation points
 mgis_bv.integrate(m, it, 0, 0, m.n);
 Ct.vector().set_local(m.K.flatten())
@@ -377,11 +390,13 @@ load_steps = load_steps(steps_filename)
 print("Load steps:", load_steps)
 Nincr = len(load_steps)'''
 
-load_steps = np.linspace(0, 1., Nincr+1)[1:]
+
+load_steps = np.linspace(0, 1.1, Nincr+1)[1:]
 results = np.zeros((Nincr+1, 2))
 
 # creating a thread pool for parallel integration
-#pool = mgis_bv.ThreadPool(4)
+#pool = mgis.ThreadPool(2)
+loop_time = time.perf_counter()
 
 for (i, t) in enumerate(load_steps):
     loading.t = t
@@ -429,13 +444,18 @@ for (i, t) in enumerate(load_steps):
     file_results.write(u, t)
     p_avg.assign(project(p, P0))
     file_results.write(p_avg, t)
+    u.set_allow_extrapolation(True)
     results[i+1, :] = (u(0, 0, 0)[0], t)
 
-import matplotlib.pyplot as plt
-plt.plot(results[:, 0], results[:, 1], "-o")
-plt.xlabel("Displacement of inner boundary")
-plt.ylabel(r"Applied pressure $q/q_{lim}$")
-plt.show()
+loop_time = time.perf_counter() - loop_time
+print("Time elapsed for solving (main loop): ", loop_time)
+
+if(MPI.rank(comm) == 1):
+    import matplotlib.pyplot as plt
+    plt.plot(results[:, 0], results[:, 1], "-o")
+    plt.xlabel("Displacement of inner boundary")
+    plt.ylabel(r"Applied pressure $q/q_{lim}$")
+    plt.show()
 
 # .. note::
 #  Note that we defined the cumulative plastic strain variable :math:`p` in FEniCS
