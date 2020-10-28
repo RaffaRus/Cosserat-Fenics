@@ -1,0 +1,122 @@
+@DSL DefaultDSL;
+@Behaviour CosseratIsotropicLinearHardeningPlasticity;
+@Author Raffaele Russo Tamara Dancheva;
+@Date   26/10/2020;
+
+@Description{
+  An implicit implementation of a simple
+  isotropic plasticity behaviour with
+  isotropic linear hardening for Cosserat
+  material (see Forest&Sievert2003,
+            "Elastoviscoplastic...", in Acta Mechanica)
+
+  // Kinematic
+  u = displacement field defined in R3;
+  w = micro-rotation field defined in R3;
+  The strain is e = grad(u) + permutation(w);
+  The wryness(curvature+torsion) is k = grad(w);
+  
+  // Elasticity
+  sigma and m are the stress and "couple stress";
+  sigma = lambda*tr(e)*I+2*mu*sym(e)+2*mu_c*skew(e);
+  m = alpha*tr(k)*I+2*beta*sym(k)+2*gamma*skew(k);
+
+  //Plasticity
+  s_dev = deviatoric stress;
+  sigma_eq = sqrt(a_1*s_dev:s_dev + a_2*s_dev:transpose(s_dev) + 
+                  b_1*m:m + b_2*m:transpose(m));
+  f  = sigma_eq - R;
+  R = H*p;
+              N*E*dot(e) + N_c*C*dot(k)
+  dot(p) = ---------------------------------  ;
+               H + N*E*N + N_c*C*N_c
+  dot(e)^p = (a_1*s_dev + a_2*transpose(s_dev))/(sigma_eq);
+  dot(k)^p = (b_1*m + b_2*transpose(m))/(sigma_eq);
+  
+}
+
+@MaterialProperty real lambda;
+//lambda.setGlossaryName("lambda");
+@MaterialProperty real mu;
+//mu.setGlossaryName("mu");
+@MaterialProperty real mu_c;
+//mu_c.setGlossaryName("mu_c");
+@MaterialProperty real alpha;
+//alpha.setGlossaryName("alpha");
+@MaterialProperty real beta;
+//beta.setGlossaryName("beta");
+@MaterialProperty real gamma;
+//gamma.setGlossaryName("gamma");
+@MaterialProperty real a_1;
+//a_1.setGlossaryName("a_1");
+@MaterialProperty real a_2;
+//a_2.setGlossaryName("a_2");
+@MaterialProperty real b_1;
+//b_1.setGlossaryName("b_1");
+@MaterialProperty real b_2;
+//b_2.setGlossaryName("b_2");
+@MaterialProperty stress H;
+H.setEntryName("HardeningSlope");
+@MaterialProperty stress R0;
+R0.setGlossaryName("YieldStress");
+
+@StateVariable strain eel[3];
+//eel.setGlossaryName("ElasticStrain");
+@StateVariable strain kel[3];
+//kel.setGlossaryName("ElasticCurvature");
+@StateVariable strain p;
+//p.setGlossaryName("EquivalentPlasticDeformation");
+@StateVariable strain kappa[3];
+@StateVariable stress sig_c[3];
+
+
+/*!
+ * computation of the prediction operator: we only provide the elastic
+ * operator.
+ *
+ * We could also provide a tangent operator, but this would mean
+ * saving an auxiliary state variable stating if a plastic loading
+ * occured at the previous time step.
+ */
+@PredictionOperator{
+  // silent "unused parameter" warning
+  static_cast<void>(smt);
+//  const auto lambda = computeLambda(young,nu);
+//  const auto mu     = computeMu(young,nu);
+  Dt = lambda*Stensor4::IxI()+(mu+mu_c)*Stensor4::Id()+(mu-mu_c)*transpose(Stensor4::Id());
+}
+
+/*!
+ * behaviour integration using a fully implicit Euler-backwark scheme.
+ */
+@ProvidesSymmetricTangentOperator;
+@Integrator{
+  //const auto lambda = computeLambda(young,nu);
+  //const auto mu     = computeMu(young,nu);
+  eel += deto;
+  kel += dkappa;
+  const auto se     = mu*deviator(eel+transpose(eel)) + mu_c*deviator(eel-transpose(eel));
+  const auto m      = alpha*trace(kel)*Tensor::Id()+2*beta*syme(kel) + 2*gamma*unsyme(kel);
+  const auto seq_e  = sqrt((3/2)*(a_1*se|se+a_2*se|transpose(se)+b_1*m|m+b_2*m|transpose(m))); // sigmaeq(se);
+  const auto b      = seq_e-R0-H*p>stress{0};
+  if(b){
+    const auto iseq_e = 1/seq_e;
+    const auto n      = eval(3*(a_1*se+a_2*transpose(se))/(2*seq_e));
+    const auto cste   = 1/(H+3*mu);
+    dp   = (seq_e-R0-H*p)*cste;
+    eel -= dp*n;
+    if(computeTangentOperator_){
+      if(smt==CONSISTENTTANGENTOPERATOR){
+	Dt = (lambda*Stensor4::IxI()+2*mu*Stensor4::Id()
+	      -4*mu*mu*(dp*iseq_e*(Stensor4::M()-(n^n))+cste*(n^n)));
+      } else {
+	Dt = lambda*Stensor4::IxI()+2*mu*Stensor4::Id();
+      }
+    }
+  } else {
+    if(computeTangentOperator_){
+      Dt = lambda*Stensor4::IxI()+2*mu*Stensor4::Id();
+    }
+  }
+  sig = lambda*trace(eel)*Stensor::Id()+2*mu*eel;
+}
