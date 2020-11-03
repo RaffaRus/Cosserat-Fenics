@@ -84,7 +84,7 @@ parameters["form_compiler"]["representation"] = 'quadrature'
 import warnings
 from ffc.quadrature.deprecation import QuadratureRepresentationDeprecationWarning
 warnings.simplefilter("once", QuadratureRepresentationDeprecationWarning)
-from ufl import Identity, PermutationSymbol
+from ufl import Identity, PermutationSymbol, indices
 import logging
 logging.getLogger('FFC').setLevel(logging.WARNING)
 logging.getLogger('UFL').setLevel(logging.WARNING)
@@ -133,21 +133,23 @@ def boundary_R(x, on_boundary):
 deg_u = 2
 deg_stress = 2
 stress_strain_dim = 9
+stress_dim = 3
 
 VE = VectorElement("CG", mesh.ufl_cell(), 2)
 THETAE = VectorElement("CG", mesh.ufl_cell(), 2)
 VT = FunctionSpace(mesh, MixedElement((VE, THETAE)))
 
 # Quadrature space for sigma
-We = VectorElement("Quadrature", mesh.ufl_cell(), degree=deg_stress, 
-                    dim=stress_strain_dim, quad_scheme='default')
+We = VectorElement("Quadrature", mesh.ufl_cell(), degree=deg_stress,
+                    dim=stress_strain_dim,
+		    quad_scheme='default')
 W = FunctionSpace(mesh, We)
 # Quadrature space for p
 W0e = FiniteElement("Quadrature", mesh.ufl_cell(), degree=deg_stress, quad_scheme='default')
 W0 = FunctionSpace(mesh, W0e)
 # Quadrature space for tangent matrix
 Wce = TensorElement("Quadrature", mesh.ufl_cell(), degree=deg_stress,
-                     shape=(stress_strain_dim, stress_strain_dim), 
+                     shape=(stress_strain_dim, stress_strain_dim),
                      quad_scheme='default')
 WC = FunctionSpace(mesh, Wce)
 
@@ -168,8 +170,8 @@ couple_sig_old = Function(W)
 Eps1 = Function(W, name="Current strain increment estimate at the end of the end step")
 Kappa1 = Function(W, name="Current wryness increment estimate at the end of the end step")
 Ct = Function(WC, name="Consistent tangent operator")
+Dt = Function(WC, name="C")
 p = Function(W0, name="Cumulative plastic strain")
-p_old = Function(W0)
 
 vt = Function(VT)
 (u, theta) = vt.split()
@@ -189,8 +191,6 @@ u1 = Function(V, name="Current displacement estimate at the end of the end step"
 du = Function(V, name="Iteration correction")
 v = TrialFunction(V)
 u_ = TestFunction(V)'''
-
-
 
 
 #print("P get local : ", dir(p.get_local()))
@@ -262,6 +262,7 @@ b = mgis_bv.load('src/libBehaviour.so','CosseratIsotropicLinearHardeningPlastici
 # Setting the material data manager
 m = mgis_bv.MaterialDataManager(b, ngauss)
 # elastic parameters for Cosserat strain
+E = 107e3
 llambda = 107e3 # In [MPa]
 mu = 70e3
 mu_c = 100e3
@@ -281,8 +282,6 @@ b_1 = 1.0
 b_2 = 1.0
 
 for s in [m.s0, m.s1]:
-    mgis_bv.setMaterialProperty(s, "HardeningSlope", H)
-    mgis_bv.setMaterialProperty(s, "YieldStrength", sig0)
     mgis_bv.setMaterialProperty(s, "lambda", llambda)
     mgis_bv.setMaterialProperty(s, "mu", mu)
     mgis_bv.setMaterialProperty(s, "mu_c", mu_c)
@@ -293,6 +292,8 @@ for s in [m.s0, m.s1]:
     mgis_bv.setMaterialProperty(s, "a_2", a_2)
     mgis_bv.setMaterialProperty(s, "b_1", b_1)
     mgis_bv.setMaterialProperty(s, "b_2", b_2)
+    mgis_bv.setMaterialProperty(s, "HardeningSlope", H)
+    mgis_bv.setMaterialProperty(s, "YieldStrength", sig0)
     mgis_bv.setExternalStateVariable(s, "Temperature", 293.15)
 
 # Boundary conditions and external loading are defined as before along with the 
@@ -324,8 +325,13 @@ def F_ext(v):
 # quadrature measure and the projection function onto Quadrature spaces::
 
 def eps_MFront(v_u, v_theta):
-    e = grad(v) +  PermuatationSymbol(3) * v_theta
-    return as_vector([e[0, 0], e[1, 1], e[2,2], sqrt(2)*e[0, 1], sqrt(2)*e[0,2], sqrt(2)*e[1,2]])
+    e = grad(v_u) +  dot(PermutationSymbol(3), v_theta)
+    return as_vector([e[0, 0], e[1, 1], e[2,2], e[0,1], e[1,0], e[0,2], e[2,0], e[1,2], e[2,1]])
+
+def kappa_MFront(v_theta):
+    k = grad(v_theta)
+    return as_vector([k[0, 0], k[1, 1], k[2,2], k[0,1], k[1,0], k[0,2], k[2,0], k[1,2], k[2,1]])
+
 
 metadata = {"quadrature_degree": deg_stress, "quadrature_scheme": "default"}
 dxm = dx(metadata=metadata)
@@ -356,8 +362,8 @@ def local_project(v, V, u=None):
 # the residual between the internal forces associated with the current
 # stress state ``sig`` and the external force vector. ::
 
-a_Newton = inner(eps_MFront(u_v, t_v), dot(Ct, eps_MFront(u_, t_)))*dxm
-res = -inner(eps_MFront(u_, t_), sig)*dxm + F_ext(u_)
+a_Newton = inner(eps_MFront(u_v, t_v), dot(Ct, eps_MFront(u_, t_)))*dxm + inner(kappa_MFront(t_v), dot(Dt, kappa_MFront(t_)))*dxm
+res = -inner(eps_MFront(u_, t_), sig)*dxm - inner(kappa_MFront(t_), couple_sig)*dxm + F_ext(u_)
 
 # Before defining the Newton-Raphson loop, we set up the output file and appropriate
 # FunctionSpace (here piecewise constant) and Function for output of the equivalent
@@ -369,15 +375,21 @@ file_results.parameters["functions_share_mesh"] = True
 P0 = FunctionSpace(mesh, "DG", 0)
 p_avg = Function(P0, name="Plastic strain")
 
-# The tangent stiffness is also initialized with the elasticity matrix::
+# The tangent stiffness is also initialized with the elasticity matrix:
 
 # one integrates the behaviour over the time step and computes an elastic stiffness
 it = mgis_bv.IntegrationType.PredictionWithElasticOperator
 #print("m.n: ", m.n)
 #m.n numer of intergation points
 mgis_bv.integrate(m, it, 0, 0, m.n);
-Ct.vector().set_local(m.K.flatten())
+tangent_operators = m.K.flatten()
+print("m.K_stride:",m.K_stride)
+print("K:",m.K)
+Ct.vector().set_local(tangent_operators[0:m.n*stress_strain_dim**2-1])
 Ct.vector().apply("insert")
+# getting the coupled tangent operator
+Dt.vector().set_local(tangent_operators[m.n*stress_strain_dim**2:])
+Dt.vector().apply("insert")
 
 
 # The main difference with respect to the pure FEniCS implementation of the previous
@@ -400,34 +412,48 @@ results = np.zeros((Nincr+1, 2))
 # creating a thread pool for parallel integration
 #pool = mgis_bv.ThreadPool(4)
 
-for (i, t) in enumerate(load_steps):
+for (i, t) in enumerate(load_steps[0:3]):
     loading.t = t
     A, Res = assemble_system(a_Newton, res, bc)
     #print(A, "RES: ", Res.get_local(), " size: ", Res.size(), " value: ", Res.norm("l2"))
     nRes0 = Res.norm("l2")
     nRes = nRes0
     u1.assign(u)
+    theta1.assign(theta)
     print("Increment:", str(i+1), " , t:", t)
     niter = 0
     while nRes > tol and niter < Nitermax:
         print("    Residual ratio: ", nRes/nRes0, ", nRes0: ", nRes0)
-        solve(A, du.vector(), Res, "mumps")
-        # update the current estimate of the displacement at the end of the time step
+        solve(A, dvt.vector(), Res, "mumps")
+        #the current estimate of the displacement at the end of the time step
+        (du, dtheta) = dvt.split()
         u1.assign(u1+du)
+        theta1.assign(theta1+dtheta)
         # compute the current estimate of the strain at the end of the
         # time step using `MFront` conventions
-        local_project(eps_MFront(u1), W, Eps1)
+        local_project(eps_MFront(u1, theta1), W, Eps1)
+        local_project(kappa_MFront(theta1), W, Kappa1)
         # copy the strain values to `MGIS`
-        m.s1.gradients[:, :] = Eps1.vector().get_local().reshape((m.n, stress_strain_dim))
+        m.s1.gradients[:, 0:stress_strain_dim-1] = Eps1.vector().get_local().reshape((m.n, stress_strain_dim))
+        m.s1.gradients[:, stress_strain_dim:] = Kappa1.vector().get_local().reshape((m.n, stress_strain_dim))
         # integrate the behaviour
         it = mgis_bv.IntegrationType.IntegrationWithConsistentTangentOperator
         mgis_bv.integrate(m, it, 0, 0, m.n);
         # getting the stress and consistent tangent operator back to
         # the FEniCS world.
-        sig.vector().set_local(m.s1.thermodynamic_forces.flatten())
+        stress_states = m.s1.thermodynamic_forces.flatten()
+        sig.vector().set_local(stress_states[0:m.n*stress_strain_dim-1])
         sig.vector().apply("insert")
-        Ct.vector().set_local(m.K.flatten())
+        # getting the couple stress
+        couple_sig.vector().set_local(stress_states[m.n*stress_strain_dim:])
+        couple_sig.vector().apply("insert")
+        # getting the tangent operator
+        tangent_operators = m.K.flatten()
+        Ct.vector().set_local(tangent_operators[0:m.n*stress_strain_dim**2-1])
         Ct.vector().apply("insert")
+        # getting the coupled tangent operator
+        Dt.vector().set_local(tangent_operators[m.n*stress_strain_dim**2:])
+        Dt.vector().apply("insert")
         # retrieve cumulated plastic strain values
         p.vector().set_local(m.s1.internal_state_variables[:, -1])
         p.vector().apply("insert")
@@ -438,6 +464,7 @@ for (i, t) in enumerate(load_steps):
         niter += 1
     # update the displacement for the next increment
     u.assign(u1)
+    theta.assign(theta1)
     # update the material
     # the update function updates an instance of the MaterialStateManager by copying the state s1 at the end of the time step in the state s0 at the beginning of the time step.
     mgis_bv.update(m)
