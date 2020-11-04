@@ -131,11 +131,11 @@ R0.setGlossaryName("YieldStress");
     kel  = kel - dp*n_c;
     if(computeTangentOperator_){
       if(smt==CONSISTENTTANGENTOPERATOR){
-        ∂σ∕∂Δεᵗᵒ = lambda*t2tot2<N,real>::IxI()+(mu+mu_c)*t2tot2<N,real>::Id()+(mu-mu_c)*t2tot2<N,real>::transpose_derivative();
-        ∂μ∕∂Δκ = alpha*t2tot2<N,real>::IxI()+(beta+gamma)*t2tot2<N,real>::Id()+(beta-gamma)*t2tot2<N,real>::transpose_derivative();
+        ∂σ∕∂Δεᵗᵒ =  ∂σ∕∂Δεᵗᵒ - ( (∂σ∕∂Δεᵗᵒ|n) ^ (n|∂σ∕∂Δεᵗᵒ) ) * cste;
+        ∂μ∕∂Δκ =    ∂μ∕∂Δκ -   ( (∂μ∕∂Δκ|n_c) ^ (n_c|∂μ∕∂Δκ) ) * cste;
       } else {
-        ∂σ∕∂Δεᵗᵒ = lambda*t2tot2<N,real>::IxI()+(mu+mu_c)*t2tot2<N,real>::Id()+(mu-mu_c)*t2tot2<N,real>::transpose_derivative();
-        ∂μ∕∂Δκ = alpha*t2tot2<N,real>::IxI()+(beta+gamma)*t2tot2<N,real>::Id()+(beta-gamma)*t2tot2<N,real>::transpose_derivative();
+        ∂σ∕∂Δεᵗᵒ =  ∂σ∕∂Δεᵗᵒ - ( (∂σ∕∂Δεᵗᵒ|n) ^ (n|∂σ∕∂Δεᵗᵒ) ) * cste;
+        ∂μ∕∂Δκ =    ∂μ∕∂Δκ -   ( (∂μ∕∂Δκ|n_c) ^ (n_c|∂μ∕∂Δκ) ) * cste;
       }
     }
   } else {
@@ -148,8 +148,8 @@ R0.setGlossaryName("YieldStress");
   μ = alpha*trace(kel)*Stensor::Id()+2*beta*syme(kel) + gamma*(kel-transpose(kel));
 }
 
-/*@TangentOperator{
+@TangentOperator{
   static_cast<void>(smt); // remove compiler warning 
-        ∂σ∕∂Δεᵗᵒ = lambda*t2tot2<N,real>::IxI()+(mu+mu_c)*t2tot2<N,real>::Id()+(mu-mu_c)*t2tot2<N,real>::transpose_derivative();
-        ∂μ∕∂Δκ = alpha*t2tot2<N,real>::IxI()+(beta+gamma)*t2tot2<N,real>::Id()+(beta-gamma)*t2tot2<N,real>::transpose_derivative();
-}*/
+  ∂σ∕∂Δεᵗᵒ = lambda*t2tot2<N,real>::IxI()+(mu+mu_c)*t2tot2<N,real>::Id()+(mu-mu_c)*t2tot2<N,real>::transpose_derivative();
+  ∂μ∕∂Δκ = alpha*t2tot2<N,real>::IxI()+(beta+gamma)*t2tot2<N,real>::Id()+(beta-gamma)*t2tot2<N,real>::transpose_derivative();
+}
