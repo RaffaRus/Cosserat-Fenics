@@ -104,7 +104,7 @@ R0.setGlossaryName("YieldStress");
  * occured at the previous time step.
  */
 @PredictionOperator{
-  static_cast<void>(smt);
+//  static_cast<void>(smt);
   ∂σ∕∂Δεᵗᵒ = lambda*t2tot2<N,real>::IxI()+(mu+mu_c)*t2tot2<N,real>::Id()+(mu-mu_c)*t2tot2<N,real>::transpose_derivative();
   ∂μ∕∂Δκ = alpha*t2tot2<N,real>::IxI()+(beta+gamma)*t2tot2<N,real>::Id()+(beta-gamma)*t2tot2<N,real>::transpose_derivative();
 }
@@ -116,12 +116,22 @@ R0.setGlossaryName("YieldStress");
 @Integrator{
   kel = kel + Δκ;
   eel = eel + Δεᵗᵒ;
+//cout<<"\n eel = "<<eel<<endl;
+//cout<<"\n kel = "<<kel<<endl;
+//cout<<"\n Δεᵗᵒ = "<<Δεᵗᵒ<<endl;
+//cout<<"\n Δκ = "<<Δκ<<endl;
   const auto se     = 2*mu*deviator(syme(eel)) + mu_c*(eel-transpose(eel));
   μ                 = alpha*trace(kel)*Tensor::Id()+2*beta*syme(kel) + gamma*(kel-transpose(kel));
   const auto seq_e  = sqrt((3/2)*(a_1*(se|se)+a_2*(se|transpose(se))+b_1*(μ|μ)+b_2*(μ|transpose(μ)))); // sigmaeq(se);
   const auto b      = seq_e-R0-H*p>stress{0};
   ∂σ∕∂Δεᵗᵒ = lambda*t2tot2<N,real>::IxI()+(mu+mu_c)*t2tot2<N,real>::Id()+(mu-mu_c)*t2tot2<N,real>::transpose_derivative();
   ∂μ∕∂Δκ = alpha*t2tot2<N,real>::IxI()+(beta+gamma)*t2tot2<N,real>::Id()+(beta-gamma)*t2tot2<N,real>::transpose_derivative();
+//cout<<"\n se = "<<se<<endl;
+//cout<<"\n μ = "<<μ<<endl;
+//cout<<"\n seq_e = "<<seq_e<<endl;
+//cout<<"\n b = "<<b<<endl;
+//cout<<"\n ∂σ∕∂Δεᵗᵒ = "<<∂σ∕∂Δεᵗᵒ<<endl;
+//cout<<"\n ∂μ∕∂Δκ = "<<∂μ∕∂Δκ<<endl;
   if(b){
     const auto n      = eval(3*(a_1*se+a_2*transpose(se))/(2*seq_e));
     const auto n_c    = eval(3*(b_1*μ+b_2*transpose(μ))/(2*seq_e));
@@ -131,11 +141,11 @@ R0.setGlossaryName("YieldStress");
     kel  = kel - dp*n_c;
     if(computeTangentOperator_){
       if(smt==CONSISTENTTANGENTOPERATOR){
-        ∂σ∕∂Δεᵗᵒ =  ∂σ∕∂Δεᵗᵒ - ( (∂σ∕∂Δεᵗᵒ|n) ^ (n|∂σ∕∂Δεᵗᵒ) ) * cste;
-        ∂μ∕∂Δκ =    ∂μ∕∂Δκ -   ( (∂μ∕∂Δκ|n_c) ^ (n_c|∂μ∕∂Δκ) ) * cste;
+        ∂σ∕∂Δεᵗᵒ =  ∂σ∕∂Δεᵗᵒ - ( (∂σ∕∂Δεᵗᵒ*n) ^ (n*∂σ∕∂Δεᵗᵒ) ) * cste;
+        ∂μ∕∂Δκ =    ∂μ∕∂Δκ -   ( (∂μ∕∂Δκ*n_c) ^ (n_c*∂μ∕∂Δκ) ) * cste;
       } else {
-        ∂σ∕∂Δεᵗᵒ =  ∂σ∕∂Δεᵗᵒ - ( (∂σ∕∂Δεᵗᵒ|n) ^ (n|∂σ∕∂Δεᵗᵒ) ) * cste;
-        ∂μ∕∂Δκ =    ∂μ∕∂Δκ -   ( (∂μ∕∂Δκ|n_c) ^ (n_c|∂μ∕∂Δκ) ) * cste;
+        ∂σ∕∂Δεᵗᵒ =  ∂σ∕∂Δεᵗᵒ - ( (∂σ∕∂Δεᵗᵒ*n) ^ (n*∂σ∕∂Δεᵗᵒ) ) * cste;
+        ∂μ∕∂Δκ =    ∂μ∕∂Δκ -   ( (∂μ∕∂Δκ*n_c) ^ (n_c*∂μ∕∂Δκ) ) * cste;
       }
     }
   } else {
@@ -144,12 +154,14 @@ R0.setGlossaryName("YieldStress");
         ∂μ∕∂Δκ = alpha*t2tot2<N,real>::IxI()+(beta+gamma)*t2tot2<N,real>::Id()+(beta-gamma)*t2tot2<N,real>::transpose_derivative();
     }
   }
-  σ = lambda*trace(eel)*Stensor::Id()+2*mu*syme(eel) + mu_c*(eel-transpose(eel));
-  μ = alpha*trace(kel)*Stensor::Id()+2*beta*syme(kel) + gamma*(kel-transpose(kel));
+  σ = lambda*trace(eel)*Tensor::Id()+2*mu*syme(eel) + mu_c*(eel-transpose(eel));
+  μ = alpha*trace(kel)*Tensor::Id()+2*beta*syme(kel) + gamma*(kel-transpose(kel));
+//cout<<"\n σ = "<<σ<<endl;
+//cout<<"\n μ = "<<μ<<endl;
 }
 
 @TangentOperator{
-  static_cast<void>(smt); // remove compiler warning 
+//  static_cast<void>(smt); // remove compiler warning 
   ∂σ∕∂Δεᵗᵒ = lambda*t2tot2<N,real>::IxI()+(mu+mu_c)*t2tot2<N,real>::Id()+(mu-mu_c)*t2tot2<N,real>::transpose_derivative();
   ∂μ∕∂Δκ = alpha*t2tot2<N,real>::IxI()+(beta+gamma)*t2tot2<N,real>::Id()+(beta-gamma)*t2tot2<N,real>::transpose_derivative();
 }
