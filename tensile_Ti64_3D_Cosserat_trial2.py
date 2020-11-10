@@ -263,7 +263,7 @@ b = mgis_bv.load('src/libBehaviour.so','CosseratIsotropicLinearHardeningPlastici
 m = mgis_bv.MaterialDataManager(b, ngauss)
 # elastic parameters for Cosserat strain
 E = 107e3
-llambda = 107e3 # In [MPa]
+llambda = 80e3 # In [MPa]
 mu = 70e3
 mu_c = 100e3
 # elastic parameters for Cosserat wryness
@@ -357,7 +357,7 @@ def local_project(v, V, u=None):
         solver.solve_local_rhs(u)
         return
 
-def exact_project(v, V, u):
+'''def exact_project(v, V, u):
     """ 
     projects v on V with custom quadrature scheme dedicated to
     FunctionSpaces V of `Quadrature` type
@@ -368,9 +368,7 @@ def exact_project(v, V, u):
     v_ = TestFunction(V)
     a_proj = inner(dv, v_)*dxm
     b_proj = inner(v, v_)*dxm
-    solve(a_proj == b_proj, u)
-
-
+    solve(a_proj == b_proj, u)'''
 
 # The bilinear form of the global problem is obtained using the consistent tangent
 # matrix ``Ct`` and the `MFront` strain measure, whereas the right-hand side consists of
@@ -399,12 +397,13 @@ it = mgis_bv.IntegrationType.PredictionWithElasticOperator
 mgis_bv.integrate(m, it, 0, 0, m.n);
 tangent_operators = m.K.flatten()
 #print("m.K_stride:",m.K_stride)
-print("K:",m.K)
-Ct.vector().set_local(tangent_operators[0:m.n*stress_strain_dim**2-1])
+Ct.vector().set_local(tangent_operators[0::2])
 Ct.vector().apply("insert")
+print("Tangent Operator:",tangent_operators[0::2])
 # getting the coupled tangent operator
-Dt.vector().set_local(tangent_operators[m.n*stress_strain_dim**2:])
+Dt.vector().set_local(tangent_operators[1::2])
 Dt.vector().apply("insert")
+print("Coupled Tangent Operator:",tangent_operators[1::2])
 
 
 # The main difference with respect to the pure FEniCS implementation of the previous
@@ -419,7 +418,7 @@ Dt.vector().apply("insert")
 # column in the present case). At the end of the iteration loop, the material 
 # behaviour and the previous displacement variable are updated::
 
-Nitermax, tol = 1, 1e-5  # parameters of the Newton-Raphson procedure
+Nitermax, tol = 3, 1e-5  # parameters of the Newton-Raphson procedure
 Nincr = 100
 load_steps = np.linspace(0, 1., Nincr+1)[1:]
 results = np.zeros((Nincr+1, 2))
@@ -443,18 +442,14 @@ for (i, t) in enumerate(load_steps[0:1]):
         solve(A, dvt.vector(), Res, "mumps")
         #the current estimate of the displacement at the end of the time step
         vt1.assign(vt1+dvt)
-        #u.assign(u1+du)
-        #theta1.assign(theta1+dtheta)
+        (u1, theta1) = vt1.split()
         # compute the current estimate of the strain at the end of the
         # time step using `MFront` conventions
-        (u1, theta1) = vt1.split()
         #exact_project(eps_MFront(u1, theta1), W, Eps1)
         local_project(eps_MFront(u1, theta1), W, Eps1)
         #exact_project(kappa_MFront(theta1), W, Kappa1)
         local_project(kappa_MFront(theta1), W, Kappa1)
         # copy the strain values to `MGIS`
-        #m.s1.gradients[:, 0:stress_strain_dim] = Eps1.vector().get_local().reshape((m.n, stress_strain_dim))
-        #m.s1.gradients[:, stress_strain_dim:] = Kappa1.vector().get_local().reshape((m.n, stress_strain_dim))
         flat_gradients = np.zeros(2*m.n*stress_strain_dim)
         flat_gradients[0::2] = Eps1.vector().get_local()
         flat_gradients[1::2] = Kappa1.vector().get_local()
@@ -470,7 +465,7 @@ for (i, t) in enumerate(load_steps[0:1]):
         # getting the stress and consistent tangent operator back to
         # the FEniCS world.
         stress_states = m.s1.thermodynamic_forces.flatten()
-        print("DIR m.s1.thermodynamic_force shape:",m.s1.thermodynamic_forces.shape, "ndim: ", m.s1.thermodynamic_forces.ndim, " size:", m.s1.thermodynamic_forces.size, "type", type(m.s1.thermodynamic_forces.size))
+        print("m.s1.thermodynamic_force shape:",m.s1.thermodynamic_forces.shape, "ndim: ", m.s1.thermodynamic_forces.ndim, " size:", m.s1.thermodynamic_forces.size, "type", type(m.s1.thermodynamic_forces.size))
         #sig.vector().set_local(stress_states[0:m.n*stress_strain_dim])
         sig.vector().set_local(stress_states[0::2])
         sig.vector().apply("insert")
@@ -481,7 +476,7 @@ for (i, t) in enumerate(load_steps[0:1]):
         couple_sig.vector().apply("insert")
         print("Coupled Stress state: ",stress_states[1::2])
         # getting the tangent operator
-        print("DIR m.K shape:",m.K.shape, "ndim: ", m.K.ndim, " size:", m.K.size, "type:", type(m.K))
+        print("m.K shape:",m.K.shape, "ndim: ", m.K.ndim, " size:", m.K.size, "type:", type(m.K))
         tangent_operators = m.K.flatten()
         #Ct.vector().set_local(tangent_operators[0:m.n*stress_strain_dim**2])
         Ct.vector().set_local(tangent_operators[0::2])
