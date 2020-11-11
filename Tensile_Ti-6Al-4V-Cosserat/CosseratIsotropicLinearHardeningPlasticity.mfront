@@ -1,0 +1,155 @@
+@DSL DefaultGenericBehaviour;
+@Behaviour CosseratIsotropicLinearHardeningPlasticity;
+@Author Raffaele Russo Tamara Dancheva Jeremy Bleyer;
+@Date   26/10/2020;
+
+@Description{
+  An implicit implementation of a simple
+  isotropic plasticity behaviour with
+  isotropic linear hardening for Cosserat
+  material (see Forest&Sievert2003,
+            "Elastoviscoplastic...", in Acta Mechanica)
+
+  // Kinematic
+  u = displacement field defined in R3;
+  w = micro-rotation field defined in R3;
+  The strain is e = grad(u) + permutation(w);
+  The wryness(curvature+torsion) is k = grad(w);
+  
+  // Elasticity
+  sigma and m are the stress and "couple stress";
+  sigma = lambda*tr(e)*I+2*mu*sym(e)+2*mu_c*skew(e);
+  m = alpha*tr(k)*I+2*beta*sym(k)+2*gamma*skew(k);
+
+  //Plasticity
+  s_dev = deviatoric stress;
+  sigma_eq = sqrt(a_1*s_dev:s_dev + a_2*s_dev:transpose(s_dev) + 
+                  b_1*m:m + b_2*m:transpose(m));
+  f  = sigma_eq - R;
+  R = H*p;
+              N*E*dot(e) + N_c*C*dot(k)
+  dot(p) = ---------------------------------  ;
+               H + N*E*N + N_c*C*N_c
+  dot(e)^p = (a_1*s_dev + a_2*transpose(s_dev))/(sigma_eq);
+  dot(k)^p = (b_1*m + b_2*transpose(m))/(sigma_eq);
+  
+}
+
+//          ISSUES: 
+//
+//          Definition of non-symmetric second order tensors for GRADs
+//          and FLUXes. ERROR: Un-supported flux and grad math type objects
+//          in BehaviorDSLCommon.cxx 4617~4658 lines block. ERROR: Unable
+//          to add entries to Glossary through setGlossaryName. As consequence
+//          we do not know the exact format in which to define the fluxes an 
+//          the material tangent matrices. 
+
+// GRADS and FLUXES related to classical solid mechanics
+
+@Gradient Tensor εᵗᵒ;
+εᵗᵒ.setEntryName("TotalStrain");
+@Flux Tensor σ;
+σ.setGlossaryName("Stress");
+
+// GRADS and FLUXES related to micro-rotation
+
+@Gradient Tensor κ;
+κ.setEntryName("WrynessTensor");
+@Flux Tensor μ;
+μ.setEntryName("CoupleStress");
+
+// State Variables to be integrated
+
+@StateVariable Tensor eel;
+//eel.setGlossaryName("ElasticStrain");
+@StateVariable Tensor kel;
+//kel.setGlossaryName("ElasticCurvature");
+@StateVariable strain p;
+//p.setGlossaryName("EquivalentPlasticDeformation");
+
+@TangentOperatorBlocks{∂σ∕∂Δεᵗᵒ, ∂μ∕∂Δκ};
+
+@MaterialProperty real lambda;
+lambda.setEntryName("lambda"); 
+@MaterialProperty real mu;
+mu.setEntryName("mu");
+@MaterialProperty real mu_c;
+mu_c.setEntryName("mu_c");
+@MaterialProperty real alpha;
+alpha.setEntryName("alpha");
+@MaterialProperty real beta;
+beta.setEntryName("beta");
+@MaterialProperty real gamma;
+gamma.setEntryName("gamma");
+@MaterialProperty real a_1;
+a_1.setEntryName("a_1");
+@MaterialProperty real a_2;
+a_2.setEntryName("a_2");
+@MaterialProperty real b_1;
+b_1.setEntryName("b_1");
+@MaterialProperty real b_2;
+b_2.setEntryName("b_2");
+@MaterialProperty stress H;
+H.setEntryName("HardeningSlope");
+@MaterialProperty stress R0;
+R0.setGlossaryName("YieldStress");
+
+
+/*!
+ * computation of the prediction operator: we only provide the elastic
+ * operator.
+ *
+ * We could also provide a tangent operator, but this would mean
+ * saving an auxiliary state variable stating if a plastic loading
+ * occured at the previous time step.
+ */
+@PredictionOperator{
+  static_cast<void>(smt);
+  ∂σ∕∂Δεᵗᵒ = lambda*t2tot2<N,real>::IxI()+(mu+mu_c)*t2tot2<N,real>::Id()+(mu-mu_c)*t2tot2<N,real>::transpose_derivative();
+  ∂μ∕∂Δκ = alpha*t2tot2<N,real>::IxI()+(beta+gamma)*t2tot2<N,real>::Id()+(beta-gamma)*t2tot2<N,real>::transpose_derivative();
+}
+
+/*!
+ * behaviour integration using a fully implicit Euler-backwark scheme.
+ */
+//@ProvidesSymmetricTangentOperator;
+@Integrator{
+  kel = kel + Δκ;
+  eel = eel + Δεᵗᵒ;
+  const auto se     = 2*mu*deviator(syme(eel)) + mu_c*(eel-transpose(eel));
+  μ                 = alpha*trace(kel)*Tensor::Id()+2*beta*syme(kel) + gamma*(kel-transpose(kel));
+  const auto seq_e  = sqrt((3/2)*(a_1*(se|se)+a_2*(se|transpose(se))+b_1*(μ|μ)+b_2*(μ|transpose(μ)))); // sigmaeq(se);
+  const auto b      = seq_e-R0-H*p>stress{0};
+  ∂σ∕∂Δεᵗᵒ = lambda*t2tot2<N,real>::IxI()+(mu+mu_c)*t2tot2<N,real>::Id()+(mu-mu_c)*t2tot2<N,real>::transpose_derivative();
+  ∂μ∕∂Δκ = alpha*t2tot2<N,real>::IxI()+(beta+gamma)*t2tot2<N,real>::Id()+(beta-gamma)*t2tot2<N,real>::transpose_derivative();
+  if(b){
+    const auto n      = eval(3*(a_1*se+a_2*transpose(se))/(2*seq_e));
+    const auto n_c    = eval(3*(b_1*μ+b_2*transpose(μ))/(2*seq_e));
+    const auto cste   = 1/(H + (n|∂σ∕∂Δεᵗᵒ|n) + (n_c|∂μ∕∂Δκ|n_c));
+    dp   = ((n|∂σ∕∂Δεᵗᵒ|Δεᵗᵒ) + (n_c|∂μ∕∂Δκ|Δκ))*cste;
+    eel  = eel - dp*n;
+    kel  = kel - dp*n_c;
+    if(computeTangentOperator_){
+      if(smt==CONSISTENTTANGENTOPERATOR){
+        ∂σ∕∂Δεᵗᵒ =  ∂σ∕∂Δεᵗᵒ - ( (∂σ∕∂Δεᵗᵒ*n) ^ (n*∂σ∕∂Δεᵗᵒ) ) * cste;
+        ∂μ∕∂Δκ =    ∂μ∕∂Δκ -   ( (∂μ∕∂Δκ*n_c) ^ (n_c*∂μ∕∂Δκ) ) * cste;
+      } else {
+        ∂σ∕∂Δεᵗᵒ =  ∂σ∕∂Δεᵗᵒ - ( (∂σ∕∂Δεᵗᵒ*n) ^ (n*∂σ∕∂Δεᵗᵒ) ) * cste;
+        ∂μ∕∂Δκ =    ∂μ∕∂Δκ -   ( (∂μ∕∂Δκ*n_c) ^ (n_c*∂μ∕∂Δκ) ) * cste;
+      }
+    }
+  } else {
+    if(computeTangentOperator_){
+        ∂σ∕∂Δεᵗᵒ = lambda*t2tot2<N,real>::IxI()+(mu+mu_c)*t2tot2<N,real>::Id()+(mu-mu_c)*t2tot2<N,real>::transpose_derivative();
+        ∂μ∕∂Δκ = alpha*t2tot2<N,real>::IxI()+(beta+gamma)*t2tot2<N,real>::Id()+(beta-gamma)*t2tot2<N,real>::transpose_derivative();
+    }
+  }
+  σ = lambda*trace(eel)*Tensor::Id()+2*mu*syme(eel) + mu_c*(eel-transpose(eel));
+  μ = alpha*trace(kel)*Tensor::Id()+2*beta*syme(kel) + gamma*(kel-transpose(kel));
+}
+
+@TangentOperator{
+  static_cast<void>(smt); // remove compiler warning 
+  ∂σ∕∂Δεᵗᵒ = lambda*t2tot2<N,real>::IxI()+(mu+mu_c)*t2tot2<N,real>::Id()+(mu-mu_c)*t2tot2<N,real>::transpose_derivative();
+  ∂μ∕∂Δκ = alpha*t2tot2<N,real>::IxI()+(beta+gamma)*t2tot2<N,real>::Id()+(beta-gamma)*t2tot2<N,real>::transpose_derivative();
+}
