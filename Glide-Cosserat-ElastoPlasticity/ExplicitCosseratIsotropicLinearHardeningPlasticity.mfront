@@ -1,0 +1,112 @@
+@DSL RungeKuttaGenericBehaviour;
+@Behaviour ExplicitCosseratIsotropicLinearHardeningPlasticity;
+@Author Raffaele Russo, Tamara Dancheva, Jeremy Bleyer;
+@Date 26 / 10 / 2020;
+
+@Description {
+  An explicit implementation of a simple
+  isotropic plasticity behaviour with
+  isotropic linear hardening for Cosserat
+  material (see Forest&Sievert2003,
+            "Elastoviscoplastic...", in Acta Mechanica)
+}
+
+// GRADS and FLUXES related to classical solid mechanics
+
+@Gradient Tensor eto;
+eto.setEntryName("TotalStrain");
+@Flux Tensor σ;
+σ.setGlossaryName("Stress");
+
+// GRADS and FLUXES related to micro-rotation
+
+@Gradient Tensor κ;
+κ.setEntryName("WrynessTensor");
+@Flux Tensor μₖ;
+μₖ.setEntryName("CoupleStress");
+
+// State Variables to be integrated
+
+@StateVariable Tensor εᵉˡ;
+εᵉˡ.setGlossaryName("ElasticStrain");
+@StateVariable Tensor κᵉˡ;
+κᵉˡ.setEntryName("ElasticCurvature");
+@StateVariable strain p;
+p.setGlossaryName("EquivalentPlasticStrain");
+
+@TangentOperatorBlocks{∂σ∕∂Δeto, ∂μₖ∕∂Δκ};
+
+@MaterialProperty real lambda;
+// lambda.setGlossaryName("lambda");
+@MaterialProperty real mu;
+// mu.setGlossaryName("mu");
+@MaterialProperty real mu_c;
+// mu_c.setGlossaryName("mu_c");
+@MaterialProperty real alpha;
+// alpha.setGlossaryName("alpha");
+@MaterialProperty real beta;
+// beta.setGlossaryName("beta");
+@MaterialProperty real gamma;
+// gamma.setGlossaryName("gamma");
+@MaterialProperty real a_1;
+// a_1.setGlossaryName("a_1");
+@MaterialProperty real a_2;
+// a_2.setGlossaryName("a_2");
+@MaterialProperty real b_1;
+// b_1.setGlossaryName("b_1");
+@MaterialProperty real b_2;
+// b_2.setGlossaryName("b_2");
+@MaterialProperty stress H;
+H.setEntryName("HardeningSlope");
+@MaterialProperty stress R0;
+R0.setGlossaryName("YieldStress");
+
+// Note @InitLocalVariables is called before @PredictionOperator and
+// @TangentOperator and @Derivative, so we can define the elastic operator here
+// to factorize the code a little bit
+@InitLocalVariables {
+  ∂σ∕∂Δeto = lambda * t2tot2<N, real>::IxI() +
+             (mu + mu_c) * t2tot2<N, real>::Id() +
+             (mu - mu_c) * t2tot2<N, real>::transpose_derivative();
+  ∂μₖ∕∂Δκ = alpha * t2tot2<N, real>::IxI() +
+           (beta + gamma) * t2tot2<N, real>::Id() +
+           (beta - gamma) * t2tot2<N, real>::transpose_derivative();
+}
+
+@ComputeThermodynamicForces {
+  σ = lambda * trace(εᵉˡ) * Tensor::Id() + 2 * mu * syme(εᵉˡ) +
+      mu_c * (εᵉˡ - transpose(εᵉˡ));
+  //cout << εᵉˡ<< endl;
+  //cout << σ << endl;
+  μₖ = alpha * trace(κᵉˡ) * Tensor::Id() + 2 * beta * syme(κᵉˡ) +
+      gamma * (κᵉˡ - transpose(κᵉˡ));
+}
+
+// Empty block, since the work is done in @InitLocalVariables
+// It must be added to declare that this operator is available
+@PredictionOperator {
+  static_cast<void>(smt);
+}
+
+@Derivative {
+  const auto se = 2 * mu * deviator(syme(εᵉˡ)) + mu_c * (εᵉˡ - transpose(εᵉˡ));
+  const auto seq = sqrt(3 * (a_1 * (se | se) + a_2 * (se | transpose(se)) +
+                             b_1 * (μₖ | μₖ) + b_2 * (μₖ | transpose(μₖ))) /
+                        2);
+  dₜεᵉˡ = dₜeto;
+  dₜκᵉˡ = dₜκ;
+  if (seq - R0 - H * p > 0) {
+    const auto n = eval(3 * (a_1 * se + a_2 * transpose(se)) / (2 * seq));
+    const auto n_c = eval(3 * (b_1 * μₖ + b_2 * transpose(μₖ)) / (2 * seq));
+    const auto cste = 1 / (H + (n |∂σ∕∂Δeto | n) + (n_c |∂μₖ∕∂Δκ | n_c));
+    dₜp = ((n |∂σ∕∂Δeto | dₜeto) + (n_c |∂μₖ∕∂Δκ | dₜκ)) * cste;
+    dₜεᵉˡ -= dₜp * n;
+    dₜκᵉˡ -= dₜp * n_c;
+  }
+}
+
+// Empty block, since the work is done in @InitLocalVariables
+// It must be added to declare that this operator is available
+@TangentOperator {
+  static_cast<void>(smt);
+}
